@@ -1,16 +1,13 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <stack>
 #include <string>
 #include <variant>
 #include <cctype>
 #include <stdexcept>
-#include <cmath>
 
-//  Tokenizer ,Lexer
 enum class Token {
-    num, add, sub, mul, div, mod, pow,
+    num, add, sub, mul, div, mod,
     parent_left, parent_right,
     identifier, assign, semicolon
 };
@@ -19,27 +16,37 @@ using token_t = std::pair<Token, std::variant<std::monostate, long long, std::st
 
 std::vector<token_t> tokenize(const std::string &input) {
     std::vector<token_t> tokens;
-    std::string buf;
+    std::string buf_num;
+    std::string buf_id;
 
     auto flush_number = [&]() {
-        if (!buf.empty()) {
-            tokens.emplace_back(Token::num, std::stoll(buf));
-            buf.clear();
+        if (!buf_num.empty()) {
+            tokens.emplace_back(Token::num, std::stoll(buf_num));
+            buf_num.clear();
         }
     };
+
     auto flush_identifier = [&]() {
-        if (!buf.empty()) {
-            tokens.emplace_back(Token::identifier, buf);
-            buf.clear();
+        if (!buf_id.empty()) {
+            tokens.emplace_back(Token::identifier, buf_id);
+            buf_id.clear();
         }
     };
 
     for (size_t i = 0; i < input.size(); ++i) {
         char c = input[i];
+
         if (std::isspace(c)) continue;
 
-        if (std::isdigit(c)) { buf += c; continue; }
-        if (std::isalpha(c)) { buf += c; continue; }
+        if (std::isdigit(c)) {
+            buf_num += c;
+            continue;
+        }
+
+        if (std::isalpha(c)) {
+            buf_id += c;
+            continue;
+        }
 
         flush_number();
         flush_identifier();
@@ -50,7 +57,6 @@ std::vector<token_t> tokenize(const std::string &input) {
             case '*': tokens.emplace_back(Token::mul, std::monostate{}); break;
             case '/': tokens.emplace_back(Token::div, std::monostate{}); break;
             case '%': tokens.emplace_back(Token::mod, std::monostate{}); break;
-            case '^': tokens.emplace_back(Token::pow, std::monostate{}); break;
             case '(': tokens.emplace_back(Token::parent_left, std::monostate{}); break;
             case ')': tokens.emplace_back(Token::parent_right, std::monostate{}); break;
             case '=': tokens.emplace_back(Token::assign, std::monostate{}); break;
@@ -64,154 +70,241 @@ std::vector<token_t> tokenize(const std::string &input) {
     return tokens;
 }
 
-//AST
 struct Node {
-    std::string type; 
+    std::string type;
     std::variant<long long, std::string, Token> value;
     Node* left = nullptr;
     Node* right = nullptr;
 };
 
-//parser
 Node* parse_expression(std::vector<token_t>& tokens, size_t& pos);
 
 Node* parse_factor(std::vector<token_t>& tokens, size_t& pos) {
     auto [tok, val] = tokens[pos];
-    if (tok == Token::num) { pos++; return new Node{"num", std::get<long long>(val)}; }
-    if (tok == Token::identifier) { pos++; return new Node{"var", std::get<std::string>(val)}; }
+
+    if (tok == Token::num) {
+        pos++;
+        return new Node{"num", std::get<long long>(val)};
+    }
+
+    if (tok == Token::identifier) {
+        pos++;
+        return new Node{"var", std::get<std::string>(val)};
+    }
+
     if (tok == Token::parent_left) {
         pos++;
         Node* n = parse_expression(tokens, pos);
-        if (tokens[pos].first != Token::parent_right)
+
+        if (pos >= tokens.size() || tokens[pos].first != Token::parent_right)
             throw std::logic_error("Missing ')'");
+
         pos++;
         return n;
     }
-    throw std::logic_error("Unexpected token in factor");
+
+    throw std::logic_error("Unexpected token");
 }
 
 Node* parse_term(std::vector<token_t>& tokens, size_t& pos) {
     Node* left = parse_factor(tokens, pos);
-    while (pos < tokens.size() && (tokens[pos].first == Token::mul || tokens[pos].first == Token::div || tokens[pos].first == Token::mod)) {
-        Token op = tokens[pos].first; pos++;
+
+    while (pos < tokens.size() &&
+           (tokens[pos].first == Token::mul ||
+            tokens[pos].first == Token::div ||
+            tokens[pos].first == Token::mod)) {
+
+        Token op = tokens[pos].first;
+        pos++;
+
         Node* right = parse_factor(tokens, pos);
-        Node* n = new Node{"op", op}; n->left = left; n->right = right;
+
+        Node* n = new Node{"op", op};
+        n->left = left;
+        n->right = right;
+
         left = n;
     }
+
     return left;
 }
 
 Node* parse_expression(std::vector<token_t>& tokens, size_t& pos) {
     Node* left = parse_term(tokens, pos);
-    while (pos < tokens.size() && (tokens[pos].first == Token::add || tokens[pos].first == Token::sub)) {
-        Token op = tokens[pos].first; pos++;
+
+    while (pos < tokens.size() &&
+           (tokens[pos].first == Token::add ||
+            tokens[pos].first == Token::sub)) {
+
+        Token op = tokens[pos].first;
+        pos++;
+
         Node* right = parse_term(tokens, pos);
-        Node* n = new Node{"op", op}; n->left = left; n->right = right;
+
+        Node* n = new Node{"op", op};
+        n->left = left;
+        n->right = right;
+
         left = n;
     }
+
     return left;
 }
 
-//  parsing
 Node* parse_statement(std::vector<token_t>& tokens, size_t& pos) {
-    if (tokens[pos].first == Token::identifier && tokens[pos+1].first == Token::assign) {
-        std::string var = std::get<std::string>(tokens[pos].second); pos += 2;
+    if (pos + 1 < tokens.size() &&
+        tokens[pos].first == Token::identifier &&
+        tokens[pos + 1].first == Token::assign) {
+
+        std::string var = std::get<std::string>(tokens[pos].second);
+        pos += 2;
+
         Node* expr = parse_expression(tokens, pos);
-        Node* n = new Node{"assign", var}; n->left = expr;
-        if (pos < tokens.size() && tokens[pos].first == Token::semicolon) pos++;
+
+        Node* n = new Node{"assign", var};
+        n->left = expr;
+
+        if (pos < tokens.size() && tokens[pos].first == Token::semicolon)
+            pos++;
+
         return n;
-    } else {
-        Node* expr = parse_expression(tokens, pos);
-        if (pos < tokens.size() && tokens[pos].first == Token::semicolon) pos++;
-        return expr;
     }
+
+    Node* expr = parse_expression(tokens, pos);
+
+    if (pos < tokens.size() && tokens[pos].first == Token::semicolon)
+        pos++;
+
+    return expr;
 }
 
-// Code Generator 
-enum class Instruction { LOAD, LOAD_VAR, STORE, ADD, SUB, MUL, DIV, MOD };
+enum class Instruction {
+    LOAD, LOAD_VAR, STORE,
+    ADD, SUB, MUL, DIV, MOD
+};
 
 struct Insn {
     Instruction op;
-    int reg;
-    std::variant<int,long long,std::string> operand;
+    int dst;
+    std::variant<long long, int, std::string> arg;
 };
 
-int reg_counter = 0; 
-int new_reg() { return reg_counter++; }
+int reg_counter = 1;
 
-void generate(Node* node, std::vector<Insn>& code, int target, std::map<std::string,int>& var_map) {
+int new_reg() {
+    return reg_counter++;
+}
+
+void generate(Node* node, std::vector<Insn>& code, int target) {
     if (node->type == "num") {
         code.push_back({Instruction::LOAD, target, std::get<long long>(node->value)});
         return;
     }
+
     if (node->type == "var") {
         code.push_back({Instruction::LOAD_VAR, target, std::get<std::string>(node->value)});
         return;
     }
+
     if (node->type == "op") {
         int r1 = new_reg();
         int r2 = new_reg();
-        generate(node->left, code, r1, var_map);
-        generate(node->right, code, r2, var_map);
+
+        generate(node->left, code, r1);
+        generate(node->right, code, r2);
+
         Token op = std::get<Token>(node->value);
-        Instruction instr;
-        switch(op) {
-            case Token::add: instr = Instruction::ADD; break;
-            case Token::sub: instr = Instruction::SUB; break;
-            case Token::mul: instr = Instruction::MUL; break;
-            case Token::div: instr = Instruction::DIV; break;
-            case Token::mod: instr = Instruction::MOD; break;
-            default: throw std::logic_error("Unknown op");
+
+        switch (op) {
+            case Token::add: code.push_back({Instruction::ADD, target, r1}); break;
+            case Token::sub: code.push_back({Instruction::SUB, target, r1}); break;
+            case Token::mul: code.push_back({Instruction::MUL, target, r1}); break;
+            case Token::div: code.push_back({Instruction::DIV, target, r1}); break;
+            case Token::mod: code.push_back({Instruction::MOD, target, r1}); break;
+            default: throw std::logic_error("Invalid operator");
         }
-        code.push_back({instr, target, r1}); 
-        code.push_back({instr, target, r2}); 
+
+        switch (op) {
+            case Token::add: code.push_back({Instruction::ADD, target, r2}); break;
+            case Token::sub: code.push_back({Instruction::SUB, target, r2}); break;
+            case Token::mul: code.push_back({Instruction::MUL, target, r2}); break;
+            case Token::div: code.push_back({Instruction::DIV, target, r2}); break;
+            case Token::mod: code.push_back({Instruction::MOD, target, r2}); break;
+            default: throw std::logic_error("Invalid operator");
+        }
+
         return;
     }
+
     if (node->type == "assign") {
         int r = new_reg();
-        generate(node->left, code, r, var_map);
+        generate(node->left, code, r);
         code.push_back({Instruction::STORE, r, std::get<std::string>(node->value)});
+        code.push_back({Instruction::LOAD_VAR, target, std::get<std::string>(node->value)});
+        return;
     }
 }
 
-// Processor 
-std::map<std::string,long long> symbols;
-std::map<int,long long> registers;
+std::map<std::string, long long> symbols;
+std::map<int, long long> regs;
 
-void execute_code(const std::vector<Insn>& code) {
+void execute(const std::vector<Insn>& code) {
     for (auto &ins : code) {
-        switch(ins.op) {
-            case Instruction::LOAD: registers[ins.reg] = std::get<long long>(ins.operand); break;
-            case Instruction::LOAD_VAR: registers[ins.reg] = symbols[std::get<std::string>(ins.operand)]; break;
-            case Instruction::STORE: symbols[std::get<std::string>(ins.operand)] = registers[ins.reg]; break;
-            case Instruction::ADD: registers[ins.reg] += registers[std::get<int>(ins.operand)]; break;
-            case Instruction::SUB: registers[ins.reg] -= registers[std::get<int>(ins.operand)]; break;
-            case Instruction::MUL: registers[ins.reg] *= registers[std::get<int>(ins.operand)]; break;
-            case Instruction::DIV: registers[ins.reg] /= registers[std::get<int>(ins.operand)]; break;
-            case Instruction::MOD: registers[ins.reg] %= registers[std::get<int>(ins.operand)]; break;
+        switch (ins.op) {
+            case Instruction::LOAD:
+                regs[ins.dst] = std::get<long long>(ins.arg);
+                break;
+
+            case Instruction::LOAD_VAR:
+                regs[ins.dst] = symbols[std::get<std::string>(ins.arg)];
+                break;
+
+            case Instruction::STORE:
+                symbols[std::get<std::string>(ins.arg)] = regs[ins.dst];
+                break;
+
+            case Instruction::ADD:
+                regs[ins.dst] += regs[std::get<int>(ins.arg)];
+                break;
+
+            case Instruction::SUB:
+                regs[ins.dst] -= regs[std::get<int>(ins.arg)];
+                break;
+
+            case Instruction::MUL:
+                regs[ins.dst] *= regs[std::get<int>(ins.arg)];
+                break;
+
+            case Instruction::DIV:
+                regs[ins.dst] /= regs[std::get<int>(ins.arg)];
+                break;
+
+            case Instruction::MOD:
+                regs[ins.dst] %= regs[std::get<int>(ins.arg)];
+                break;
         }
     }
 }
-
 
 int main() {
     std::string input;
-    std::cout << "Enter code (e.g., a=5;b=2;a+6*b):\n";
     std::getline(std::cin, input);
 
     auto tokens = tokenize(input);
+
     size_t pos = 0;
     std::vector<Node*> statements;
-    while (pos < tokens.size()) statements.push_back(parse_statement(tokens, pos));
+
+    while (pos < tokens.size())
+        statements.push_back(parse_statement(tokens, pos));
 
     std::vector<Insn> code;
-    std::map<std::string,int> var_map;
 
-    for (auto stmt : statements) generate(stmt, code, 0, var_map); 
+    for (auto stmt : statements)
+        generate(stmt, code, 0);
 
-    execute_code(code);
+    execute(code);
 
-    std::cout << "Result in R0: " << registers[0] << "\n";
-
+    std::cout << regs[0] << "\n";
     return 0;
 }
