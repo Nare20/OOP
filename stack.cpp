@@ -6,9 +6,7 @@ int main(){
 stack<int> st;
 st.push(5);
 st.push(10);
-//cout << st.top() << endl; ;
-//st.pop();
-//cout << st.top() ;
+
 if(st.empty())
     cout << "stack is empty" << endl;
 else
