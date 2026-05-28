@@ -8,11 +8,11 @@
 #include <string>
 #include <vector>
 
-// Forward declarations
+
 std::vector<Token> runLexer (const std::string& source);
 Program            runParser(std::vector<Token> tokens);
 
-// Run source code through the full pipeline in one shot (no .exe file)
+
 bool runSource(const std::string& src, bool debug) {
     try {
         auto tokens  = runLexer(src);
@@ -28,7 +28,7 @@ bool runSource(const std::string& src, bool debug) {
     }
 }
 
-// Interactive REPL
+
 void runRepl(bool debug) {
     std::cout << "MiniLang REPL  (exit | --debug)\n";
     std::string line, buf;
